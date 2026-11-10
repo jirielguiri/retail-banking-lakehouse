@@ -1,0 +1,74 @@
+// Gold Layer: Dimensional Star Schema for Loan Portfolio & Delinquency Analytics
+// Target Catalog/Schema: retail_banking_dw.gold
+
+Table dim_date {
+  date_key int [pk, note: 'YYYYMMDD format, e.g., 20261110']
+  full_date date [not null]
+  year int
+  quarter int
+  month int
+  month_name varchar
+  day_of_month int
+  is_weekend boolean
+  is_month_end boolean
+}
+
+Table dim_customer {
+  customer_sk bigint [pk, note: 'Surrogate Key (xxhash64 of customer_id + __START_AT)']
+  customer_id varchar [not null, note: 'Party Natural Key']
+  national_id varchar [note: 'Masked via UC Column Mask']
+  full_name varchar
+  email varchar [note: 'Masked via UC Column Mask']
+  branch_region varchar [not null, note: 'Filtered via UC Row Filter']
+  banking_segment varchar [not null]
+  credit_score int
+  credit_tier varchar [not null, note: 'Historical tier from SCD2']
+  address_city varchar
+  effective_from timestamp [not null]
+  effective_to timestamp
+  is_current boolean [not null]
+}
+
+Table dim_product {
+  product_sk bigint [pk, note: 'Surrogate Key']
+  product_code varchar [not null, note: 'Natural Key']
+  product_name varchar
+  product_domain varchar [note: 'LENDING']
+  product_category varchar [note: 'MORTGAGE, CONSUMER_LOAN, AUTO_LOAN']
+  base_interest_rate decimal(5,4)
+  collateral_required boolean
+}
+
+Table fact_loan_repayments {
+  repayment_sk bigint [pk, note: 'Surrogate Key']
+  transaction_id varchar [not null, note: 'Degenerate Dimension - Core Transaction NK']
+  contract_id varchar [not null, note: 'Degenerate Dimension - Core Contract NK']
+  transaction_date_key int [not null, ref: > dim_date.date_key]
+  customer_sk bigint [not null, ref: > dim_customer.customer_sk, note: 'Point-in-time SCD2 join']
+  product_sk bigint [not null, ref: > dim_product.product_sk]
+  transaction_type_code varchar [not null, note: 'SCHEDULED_REPAYMENT, EARLY_REPAYMENT']
+  payment_channel varchar
+  total_paid_amount decimal(18,2)
+  principal_paid_amount decimal(18,2)
+  interest_paid_amount decimal(18,2)
+  fee_paid_amount decimal(18,2)
+  days_past_due int
+  _updated_at timestamp
+  Note: 'Filtered to repayment transactions. Liquid Clustered by (transaction_date_key, customer_sk). CDF & Deletion Vectors enabled.'
+}
+
+Table fact_monthly_contract_snapshot {
+  snapshot_date_key int [pk, ref: > dim_date.date_key, note: 'Month-end date key']
+  contract_id varchar [pk, note: 'Contract Natural Key']
+  customer_sk bigint [not null, ref: > dim_customer.customer_sk]
+  product_sk bigint [not null, ref: > dim_product.product_sk]
+  origination_date_key int [ref: > dim_date.date_key]
+  principal_original_amount decimal(18,2)
+  remaining_principal_balance decimal(18,2)
+  cumulative_interest_paid decimal(18,2)
+  days_past_due int [not null]
+  delinquency_bucket varchar [not null, note: 'PERFORMING (0), EARLY_ARREARS (1-30), DELINQUENT (31-89), NPL_DEFAULT (90+)']
+  contract_status varchar
+  _updated_at timestamp
+  Note: 'Periodic Snapshot Fact. Liquid Clustered by (snapshot_date_key, delinquency_bucket).'
+}

@@ -1,0 +1,15 @@
+# Source-to-Target Mapping (STTM): Retail Banking Lakehouse
+
+| Target Layer | Target Table | Target Column | Source Object | Source Column / Expression | Transformation & Data Quality Rules |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **Bronze** | `bronze_customers` | `*`, `_rescued_data` | `/Volumes/.../landing/customers/*.json` | Raw JSON payload | Ingested via `cloud_files` (Auto Loader) with schema evolution and `_metadata.file_path`. |
+| **Bronze** | `bronze_contracts` | `*`, `_rescued_data` | `/Volumes/.../landing/contracts/*.csv` | Raw CSV columns | Ingested via `cloud_files` (Auto Loader) with `rescuedDataColumn`. |
+| **Bronze** | `bronze_transactions` | `*`, `_rescued_data` | `/Volumes/.../landing/transactions/*.json` | Raw JSON payload | Ingested via `cloud_files` (Auto Loader). |
+| **Silver** | `silver_customers_scd2` | `customer_id`, `credit_tier`, `__START_AT`, `__END_AT` | `bronze_customers` | `customer_id`, `credit_score` | `AUTO CDC` (`SCD Type 2`) sequenced by `updated_at`. Derives `credit_tier` (`A` >= 750, `B` >= 650, `C` >= 550, else `D`). Expects `customer_id IS NOT NULL`. |
+| **Silver** | `silver_contracts` | `principal_amount`, `interest_rate` | `bronze_contracts` | `CAST(principal_amount AS DECIMAL(18,2))` | `@dp.expect_or_drop("valid_principal_and_rate", "principal_amount > 0 AND interest_rate BETWEEN 0 AND 0.50")`. |
+| **Silver** | `silver_financial_transactions` | `transaction_id`, `total_transaction_amount` | `bronze_transactions` | `transaction_id`, `principal_amount + interest_amount + fee_amount` | Deduplicated by `transaction_id` via watermark/window. `@dp.expect_or_drop("positive_transaction", "total_transaction_amount > 0")`. |
+| **Silver** | `silver_quarantine_records` | `raw_payload`, `failed_rule` | `bronze_*` | `to_json(struct(*))` | Captures rows failing Silver `@dp` expectations or containing non-null `_rescued_data`. |
+| **Gold** | `dim_customer` | `customer_sk`, `full_name`, `is_current` | `silver_customers_scd2` | `xxhash64(customer_id, __START_AT)` | Concatenates `first_name` + `last_name`. Maps `__END_AT IS NULL` to `is_current = TRUE`. |
+| **Gold** | `dim_product` | `product_sk`, `product_code` | `silver_products` | `xxhash64(product_code)` | Filters `product_domain = 'LENDING'`. |
+| **Gold** | `fact_loan_repayments` | `customer_sk`, `total_paid_amount` | `silver_financial_transactions` + `dim_customer` | Point-in-time join on `transaction_timestamp` | Filters `transaction_type_code IN ('SCHEDULED_REPAYMENT', 'EARLY_REPAYMENT')`. Joins to `dim_customer` where `transaction_timestamp >= effective_from AND (transaction_timestamp < effective_to OR effective_to IS NULL)`. Upserted via `MERGE INTO`. |
+| **Gold** | `fact_monthly_contract_snapshot` | `remaining_principal_balance`, `delinquency_bucket` | `silver_contracts` + `silver_financial_transactions` | `principal_amount - SUM(principal_amount)` | Aggregated as of month-end. Classifies DPD into Basel/IFRS9-style buckets (`PERFORMING`, `1-30`, `31-89`, `90+ NPL`). |
