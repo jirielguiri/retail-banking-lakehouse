@@ -245,7 +245,8 @@ def silver_customers_clean_v():
              .otherwise(F.lit("D"))
         )
         .withColumn("updated_at", F.col("updated_at").cast("timestamp"))
-        .drop("_rescued_data")
+        # NOTE: Do NOT .drop("_rescued_data") here because @dp.expect_or_drop
+        # evaluates against the returned DataFrame! We exclude it in create_auto_cdc_flow below.
     )
 
 
@@ -261,7 +262,7 @@ dp.create_auto_cdc_flow(
     keys=["customer_id"],
     sequence_by=F.col("updated_at"),
     stored_as_scd_type=2,
-    except_column_list=["updated_at"],
+    except_column_list=["updated_at", "_rescued_data"],
     track_history_column_list=[
         "credit_score",
         "credit_tier",
