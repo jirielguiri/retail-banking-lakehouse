@@ -1,4 +1,8 @@
 # Databricks notebook source
+# /// script
+# [tool.databricks.environment]
+# environment_version = "6"
+# ///
 # ============================================================================
 # Phase 2: Synthetic Retail Banking Data Generator (Bronze Landing Volume)
 # Writes realistic Day 1 & Day 2 CSV/JSON batches into Unity Catalog Volume

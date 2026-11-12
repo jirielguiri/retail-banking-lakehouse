@@ -1,4 +1,9 @@
 # Databricks notebook source
+# /// script
+# [tool.databricks.environment]
+# environment_version = "6"
+# ///
+# Databricks notebook source
 # =============================================================================
 # Phase 4: Gold Dimensional Mart ETL (Idempotent MERGE INTO & Point-in-Time SCD2)
 # Target Catalog/Schema: retail_banking_dw.gold
@@ -189,6 +194,11 @@ print("3. dim_product merged successfully.")
 spark.sql("""
 MERGE INTO retail_banking_dw.gold.fact_loan_repayments AS tgt
 USING (
+    WITH earliest_customer_versions AS (
+        SELECT customer_id, MIN(effective_from) AS min_effective_from
+        FROM retail_banking_dw.gold.dim_customer
+        GROUP BY customer_id
+    )
     SELECT
         xxhash64(t.transaction_id) AS repayment_sk,
         t.transaction_id,
@@ -209,16 +219,14 @@ USING (
         ON t.contract_id = c.contract_id
     INNER JOIN retail_banking_dw.gold.dim_product dp
         ON c.product_code = dp.product_code
-    -- Point-in-time SCD Type 2 join (with fallback to earliest version if txn predates initial SCD2 load)
+    INNER JOIN earliest_customer_versions ecv
+        ON c.customer_id = ecv.customer_id
+    -- Point-in-time SCD Type 2 join with precomputed earliest version fallback
     INNER JOIN retail_banking_dw.gold.dim_customer dc
         ON c.customer_id = dc.customer_id
         AND (
             (t.transaction_timestamp >= dc.effective_from AND (t.transaction_timestamp < dc.effective_to OR dc.effective_to IS NULL))
-            OR (t.transaction_timestamp < dc.effective_from AND dc.effective_from = (
-                SELECT MIN(dc2.effective_from)
-                FROM retail_banking_dw.gold.dim_customer dc2
-                WHERE dc2.customer_id = c.customer_id
-            ))
+            OR (t.transaction_timestamp < dc.effective_from AND dc.effective_from = ecv.min_effective_from)
         )
     WHERE t.transaction_type_code IN ('SCHEDULED_REPAYMENT', 'EARLY_REPAYMENT')
 ) AS src
@@ -240,6 +248,11 @@ USING (
             to_date('2026-02-28'),
             to_date('2026-03-31')
         )) AS snap_date
+    ),
+    earliest_customer_versions AS (
+        SELECT customer_id, MIN(effective_from) AS min_effective_from
+        FROM retail_banking_dw.gold.dim_customer
+        GROUP BY customer_id
     ),
     txns_to_date AS (
         SELECT
@@ -279,15 +292,13 @@ USING (
         ON tx.contract_id = c.contract_id
     INNER JOIN retail_banking_dw.gold.dim_product dp
         ON c.product_code = dp.product_code
+    INNER JOIN earliest_customer_versions ecv
+        ON c.customer_id = ecv.customer_id
     INNER JOIN retail_banking_dw.gold.dim_customer dc
         ON c.customer_id = dc.customer_id
         AND (
             (CAST(tx.snap_date AS TIMESTAMP) >= dc.effective_from AND (CAST(tx.snap_date AS TIMESTAMP) < dc.effective_to OR dc.effective_to IS NULL))
-            OR (CAST(tx.snap_date AS TIMESTAMP) < dc.effective_from AND dc.effective_from = (
-                SELECT MIN(dc2.effective_from)
-                FROM retail_banking_dw.gold.dim_customer dc2
-                WHERE dc2.customer_id = c.customer_id
-            ))
+            OR (CAST(tx.snap_date AS TIMESTAMP) < dc.effective_from AND dc.effective_from = ecv.min_effective_from)
         )
 ) AS src
 ON tgt.snapshot_date_key = src.snapshot_date_key AND tgt.contract_id = src.contract_id
