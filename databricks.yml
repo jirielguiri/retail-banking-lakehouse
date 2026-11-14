@@ -1,0 +1,86 @@
+# ==============================================================================
+# Databricks Asset Bundle (DAB) Configuration
+# Project: Retail Banking & Loan Portfolio Lakehouse
+# ==============================================================================
+
+bundle:
+  name: retail_banking_lakehouse
+
+variables:
+  catalog_name:
+    description: Target Unity Catalog name
+    default: retail_banking_dw
+  landing_volume_path:
+    description: Managed Volume landing zone for raw banking extracts
+    default: /Volumes/retail_banking_dw/bronze/landing
+
+resources:
+  # 1. Lakeflow Spark Declarative Pipeline (Bronze Auto Loader -> Silver 3NF & SCD2)
+  pipelines:
+    retail_banking_bronze_silver_sdp:
+      name: "[${bundle.target}] Retail Banking Bronze-to-Silver SDP"
+      catalog: ${var.catalog_name}
+      target: silver
+      serverless: true
+      continuous: false
+      channel: CURRENT
+      libraries:
+        - file:
+            path: ./src/01_sdp_bronze_silver/bronze_to_silver_sdp.py
+
+  # 2. Orchestrated End-to-End Batch Workflow (Generator -> SDP -> Gold Mart -> UC Security)
+  jobs:
+    retail_banking_daily_etl_job:
+      name: "[${bundle.target}] Retail Banking Lakehouse Orchestration"
+      max_concurrent_runs: 1
+      schedule:
+        quartz_cron_expression: "0 0 2 * * ?"
+        timezone_id: "Europe/Prague"
+        pause_status: PAUSED
+      tasks:
+        - task_key: generate_synthetic_landing_data
+          notebook_task:
+            notebook_path: ./src/00_setup_and_generator/02_synthetic_data_gen.py
+
+        - task_key: run_bronze_silver_declarative_pipeline
+          depends_on:
+            - task_key: generate_synthetic_landing_data
+          pipeline_task:
+            pipeline_id: ${resources.pipelines.retail_banking_bronze_silver_sdp.id}
+            full_refresh: false
+
+        - task_key: build_gold_star_schema_mart
+          depends_on:
+            - task_key: run_bronze_silver_declarative_pipeline
+          notebook_task:
+            notebook_path: ./src/02_gold_dimensional_mart/02_gold_etl_merge.py
+
+        - task_key: apply_uc_governance_policies
+          depends_on:
+            - task_key: build_gold_star_schema_mart
+          sql_task:
+            file:
+              path: ./src/03_uc_governance/uc_security_policies.sql
+            warehouse_id: ${var.warehouse_id}
+
+        - task_key: run_dq_and_security_validation
+          depends_on:
+            - task_key: apply_uc_governance_policies
+          sql_task:
+            file:
+              path: ./tests/dq_and_security_validation.sql
+            warehouse_id: ${var.warehouse_id}
+
+targets:
+  dev:
+    mode: development
+    default: true
+    variables:
+      catalog_name: retail_banking_dw
+      warehouse_id: "REPLACE_WITH_SQL_WAREHOUSE_ID"
+
+  prod:
+    mode: production
+    variables:
+      catalog_name: retail_banking_dw_prod
+      warehouse_id: "REPLACE_WITH_PROD_SQL_WAREHOUSE_ID"
