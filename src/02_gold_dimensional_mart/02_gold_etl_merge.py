@@ -1,4 +1,9 @@
 # Databricks notebook source
+# /// script
+# [tool.databricks.environment]
+# environment_version = "6"
+# ///
+# Databricks notebook source
 # =============================================================================
 # Phase 4: Gold Dimensional Mart ETL (Idempotent MERGE INTO & Point-in-Time SCD2)
 # Target Catalog/Schema: retail_banking_dw.gold
