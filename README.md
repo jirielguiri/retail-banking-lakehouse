@@ -1,5 +1,5 @@
 # Retail Banking & Loan Portfolio Lakehouse (Databricks)
-
+[![Lakehouse CI/CD Pipeline](https://github.com/jirielguiri/retail-banking-lakehouse/actions/workflows/ci_cd.yml/badge.svg)](https://github.com/jirielguiri/retail-banking-lakehouse/actions/workflows/ci_cd.yml)
 An end-to-end, enterprise-grade **Medallion Lakehouse** built on **Databricks Unity Catalog**, **Lakeflow Spark Declarative Pipelines (`@dp`)**, and **Delta Lake**, combining **FSLDM-inspired 3NF Core Data Modeling** with a **Kimball Dimensional Star Schema**.
 
 ---

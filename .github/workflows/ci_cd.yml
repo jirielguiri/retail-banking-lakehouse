@@ -1,0 +1,75 @@
+name: Lakehouse CI/CD Pipeline
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  ci-test-and-lint:
+    name: Lint, PySpark Unit Tests & YAML Check
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Java 17 (required for PySpark)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dev & test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: Run Ruff linter on modular Python & tests
+        run: ruff check src/utils tests/unit
+
+      - name: Run PySpark unit tests (pytest)
+        run: PYTHONPATH=. pytest tests/unit -v
+
+      - name: Validate databricks.yml syntax & bundle keys
+        run: |
+          python -c "
+          import yaml
+          with open('databricks.yml', 'r', encoding='utf-8') as f:
+              cfg = yaml.safe_load(f)
+          assert 'bundle' in cfg and 'resources' in cfg and 'targets' in cfg
+          assert 'dev' in cfg['targets'] and 'prod' in cfg['targets']
+          print('databricks.yml schema check passed for bundle:', cfg['bundle']['name'])
+          "
+
+  cd-bundle-deploy:
+    name: Databricks Asset Bundle Validate & Deploy
+    needs: ci-test-and-lint
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.ENABLE_DAB_DEPLOY == 'true'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Databricks CLI
+        uses: databricks/setup-cli@main
+
+      - name: Validate Asset Bundle (dev)
+        env:
+          DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
+          DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
+        run: databricks bundle validate -t dev
+
+      - name: Deploy Asset Bundle (dev)
+        env:
+          DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
+          DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
+        run: databricks bundle deploy -t dev

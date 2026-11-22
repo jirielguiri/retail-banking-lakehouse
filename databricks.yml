@@ -13,6 +13,12 @@ variables:
   landing_volume_path:
     description: Managed Volume landing zone for raw banking extracts
     default: /Volumes/retail_banking_dw/bronze/landing
+  warehouse_id:
+    description: SQL Warehouse ID for UC governance and validation SQL tasks
+    default: "REPLACE_WITH_SQL_WAREHOUSE_ID"
+  alert_email:
+    description: Data engineering on-call email for job failure notifications
+    default: "data-engineering-alerts@example.com"
 
 resources:
   # 1. Lakeflow Spark Declarative Pipeline (Bronze Auto Loader -> Silver 3NF & SCD2)
@@ -28,23 +34,30 @@ resources:
         - file:
             path: ./src/01_sdp_bronze_silver/bronze_to_silver_sdp.py
 
-  # 2. Orchestrated End-to-End Batch Workflow (Generator -> SDP -> Gold Mart -> UC Security)
+  # 2. Orchestrated End-to-End Batch Workflow with taskValues & Conditional Branching
   jobs:
     retail_banking_daily_etl_job:
       name: "[${bundle.target}] Retail Banking Lakehouse Orchestration"
       max_concurrent_runs: 1
+      timeout_seconds: 3600
+      email_notifications:
+        on_failure:
+          - ${var.alert_email}
       schedule:
         quartz_cron_expression: "0 0 2 * * ?"
         timezone_id: "Europe/Prague"
         pause_status: PAUSED
       tasks:
         - task_key: generate_synthetic_landing_data
+          max_retries: 1
           notebook_task:
             notebook_path: ./src/00_setup_and_generator/02_synthetic_data_gen.py
 
         - task_key: run_bronze_silver_declarative_pipeline
           depends_on:
             - task_key: generate_synthetic_landing_data
+          max_retries: 2
+          min_retry_interval_millis: 30000
           pipeline_task:
             pipeline_id: ${resources.pipelines.retail_banking_bronze_silver_sdp.id}
             full_refresh: false
@@ -52,6 +65,7 @@ resources:
         - task_key: build_gold_star_schema_mart
           depends_on:
             - task_key: run_bronze_silver_declarative_pipeline
+          max_retries: 1
           notebook_task:
             notebook_path: ./src/02_gold_dimensional_mart/02_gold_etl_merge.py
 
@@ -63,9 +77,24 @@ resources:
               path: ./src/03_uc_governance/uc_security_policies.sql
             warehouse_id: ${var.warehouse_id}
 
-        - task_key: run_dq_and_security_validation
+        - task_key: audit_pipeline_metrics
           depends_on:
             - task_key: apply_uc_governance_policies
+          notebook_task:
+            notebook_path: ./src/02_gold_dimensional_mart/03_pipeline_audit_task.py
+
+        - task_key: check_quarantine_threshold
+          depends_on:
+            - task_key: audit_pipeline_metrics
+          condition_task:
+            op: GREATER_THAN
+            left: "{{tasks.audit_pipeline_metrics.values.quarantine_count}}"
+            right: "0"
+
+        - task_key: run_dq_and_security_validation
+          depends_on:
+            - task_key: check_quarantine_threshold
+              outcome: "true"
           sql_task:
             file:
               path: ./tests/dq_and_security_validation.sql
