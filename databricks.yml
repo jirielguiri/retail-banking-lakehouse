@@ -99,7 +99,24 @@ resources:
             file:
               path: ./tests/dq_and_security_validation.sql
             warehouse_id: ${var.warehouse_id}
-
+    
+    retail_banking_weekly_maintenance_job:
+      name: "[${bundle.target}] Retail Banking Weekly Delta Maintenance"
+      max_concurrent_runs: 1
+      timeout_seconds: 3600
+      email_notifications:
+        on_failure:
+          - ${var.alert_email}
+      schedule:
+        quartz_cron_expression: "0 0 4 ? * SUN"
+        timezone_id: "Europe/Prague"
+        pause_status: PAUSED
+      tasks:
+        - task_key: optimize_analyze_vacuum_gold
+          sql_task:
+            file:
+              path: ./src/02_gold_dimensional_mart/04_delta_maintenance.sql
+            warehouse_id: ${var.warehouse_id}
 targets:
   dev:
     mode: development

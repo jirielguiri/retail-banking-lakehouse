@@ -199,7 +199,7 @@ USING (
         FROM retail_banking_dw.gold.dim_customer
         GROUP BY customer_id
     )
-    SELECT
+    SELECT /*+ RANGE_JOIN(c, 86400), BROADCAST(p) */
         xxhash64(t.transaction_id) AS repayment_sk,
         t.transaction_id,
         t.contract_id,
