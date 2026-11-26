@@ -105,7 +105,7 @@ def publish_cdf_micro_batch(micro_batch_df: DataFrame, batch_id: int) -> None:
 cdf_stream_df = (
     spark.readStream.format("delta")
     .option("readChangeFeed", "true")
-    .option("startingVersion", 0)
+    # .option("startingVersion", 0) #we don't have a starting version 0 anymore, so we will read all available versions
     .table(SOURCE_TABLE)
     # Exclude 'update_preimage' so downstream consumers only receive final post-update states
     .filter(F.col("_change_type").isin("insert", "update_postimage", "delete"))
