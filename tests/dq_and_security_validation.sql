@@ -111,4 +111,19 @@ FROM table_changes('retail_banking_dw.gold.dim_customer', 1)
 WHERE customer_id = 'CUST-1001'
 ORDER BY _commit_version;
 
+-- -----------------------------------------------------------------------------
+-- TEST 7: Verify Regulatory CDF Outbox (Structured Streaming + foreachBatch)
+-- Expected: All repayment inserts/updates captured with commit versions &
+--           timestamps; zero 'update_preimage' rows present.
+-- -----------------------------------------------------------------------------
+SELECT
+    cdf_commit_version,
+    cdf_change_type,
+    COUNT(*) AS event_count,
+    SUM(total_paid_amount) AS total_reported_czk,
+    MAX(published_at) AS last_published_at
+FROM retail_banking_dw.gold.regulatory_repayment_cdf_outbox
+GROUP BY cdf_commit_version, cdf_change_type
+ORDER BY cdf_commit_version, cdf_change_type;
+
 DESCRIBE DETAIL retail_banking_dw.gold.fact_loan_repayments;

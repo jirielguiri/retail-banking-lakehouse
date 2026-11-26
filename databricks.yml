@@ -68,7 +68,12 @@ resources:
           max_retries: 1
           notebook_task:
             notebook_path: ./src/02_gold_dimensional_mart/02_gold_etl_merge.py
-
+        - task_key: publish_regulatory_cdf_outbox
+                  depends_on:
+                    - task_key: build_gold_star_schema_mart
+                  max_retries: 1
+                  notebook_task:
+                    notebook_path: ./src/04_streaming_cdf/regulatory_cdf_outbox_stream.py
         - task_key: apply_uc_governance_policies
           depends_on:
             - task_key: build_gold_star_schema_mart
