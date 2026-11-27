@@ -68,12 +68,14 @@ resources:
           max_retries: 1
           notebook_task:
             notebook_path: ./src/02_gold_dimensional_mart/02_gold_etl_merge.py
-                    - task_key: publish_regulatory_cdf_outbox
-                  depends_on:
-                    - task_key: build_gold_star_schema_mart
-                  max_retries: 1
-                  notebook_task:
-                    notebook_path: ./src/04_streaming_cdf/regulatory_cdf_outbox_stream.py
+
+        - task_key: publish_regulatory_cdf_outbox
+          depends_on:
+            - task_key: build_gold_star_schema_mart
+          max_retries: 1
+          notebook_task:
+            notebook_path: ./src/04_streaming_cdf/regulatory_cdf_outbox_stream.py
+
         - task_key: apply_uc_governance_policies
           depends_on:
             - task_key: build_gold_star_schema_mart
@@ -104,7 +106,7 @@ resources:
             file:
               path: ./tests/dq_and_security_validation.sql
             warehouse_id: ${var.warehouse_id}
-    
+
     retail_banking_weekly_maintenance_job:
       name: "[${bundle.target}] Retail Banking Weekly Delta Maintenance"
       max_concurrent_runs: 1
@@ -122,6 +124,7 @@ resources:
             file:
               path: ./src/02_gold_dimensional_mart/04_delta_maintenance.sql
             warehouse_id: ${var.warehouse_id}
+
 targets:
   dev:
     mode: development
